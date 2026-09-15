@@ -552,17 +552,32 @@ def main():
         if arg == '--date' and i + 1 < len(args):
             date_override = args[i + 1]
 
+    now = datetime.now()
+
+    # 正式模式下，抢票时间是下一个0点（明天），需要用明天的日期和星期
+    if not test_only:
+        target_time = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if now >= target_time:
+            target_time += timedelta(days=1)
+        target_weekday = target_time.weekday()
+        target_date_str = target_time.strftime('%Y%m%d')
+    else:
+        target_weekday = now.weekday()
+        target_date_str = now.strftime('%Y%m%d')
+
     # 确定 product_id 和日期
-    weekday = datetime.now().weekday()
+    weekday = target_weekday
     product_id = PRODUCT_ID_MAP[weekday]
-    date_str = date_override or datetime.now().strftime('%Y%m%d')
+    date_str = date_override or target_date_str
     day_name = DAY_NAMES[weekday]
 
     print(f"{'='*60}")
     print(f"游泳馆免费票全自动抢票")
     print(f"{'='*60}")
-    print(f"  时间:     {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  星期:     {day_name}")
+    print(f"  时间:     {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    if not test_only:
+        print(f"  目标:     {target_time.strftime('%Y-%m-%d %H:%M:%S')} (明天0点)")
+    print(f"  星期:     {day_name} (目标日期)")
     print(f"  product_id: {product_id}")
     print(f"  日期:     {date_str}")
     print(f"  SKU:      121000{product_id}{date_str}:1")
@@ -670,9 +685,10 @@ def main():
         clock_offset = calibrate_clock(session, token)
 
     # 显示7天映射表
+    target_label = "目标日" if not test_only else "今天"
     print(f"\n星期 -> product_id 映射表:")
     for w, pid in sorted(PRODUCT_ID_MAP.items()):
-        marker = " <- 今天" if w == weekday else ""
+        marker = f" <- {target_label}" if w == weekday else ""
         print(f"  {DAY_NAMES[w]}: {pid}{marker}")
 
     # 确认

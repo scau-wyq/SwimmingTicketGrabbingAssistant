@@ -527,27 +527,43 @@ def main():
 
     token = get_token()
 
+    now = datetime.now()
+
+    # 正式模式下，抢票时间是下一个0点（明天），需要用明天的日期和星期
+    is_normal_mode = not (dry_run or test_mode or check_mode or all_days)
+    if is_normal_mode:
+        # 计算下一个0点
+        target_time = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        if now >= target_time:
+            target_time += timedelta(days=1)
+        target_weekday = target_time.weekday()
+        target_date_str = target_time.strftime('%Y%m%d')
+    else:
+        target_weekday = now.weekday()
+        target_date_str = now.strftime('%Y%m%d')
+
     # 确定 product_id
     if product_id_override:
         product_id = product_id_override
     else:
-        weekday = datetime.now().weekday()
-        product_id = PRODUCT_ID_MAP[weekday]
+        product_id = PRODUCT_ID_MAP[target_weekday]
 
     # 确定日期
     if date_override:
         date_str = date_override
     else:
-        date_str = datetime.now().strftime('%Y%m%d')
+        date_str = target_date_str
 
-    weekday = datetime.now().weekday()
+    weekday = target_weekday
     day_name = DAY_NAMES[weekday]
 
     print(f"{'='*60}")
     print(f"游泳馆免费票抢票脚本")
     print(f"{'='*60}")
-    print(f"  当前时间:   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"  星期:       {day_name}")
+    print(f"  当前时间:   {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    if is_normal_mode:
+        print(f"  目标时间:   {target_time.strftime('%Y-%m-%d %H:%M:%S')} (明天0点)")
+    print(f"  星期:       {day_name} (目标日期)")
     print(f"  product_id: {product_id}")
     print(f"  日期:       {date_str}")
     print(f"  SKU:        121000{product_id}{date_str}:1")
@@ -631,9 +647,10 @@ def main():
         session.close()
 
     # 显示7天映射表
+    target_label = "目标日" if is_normal_mode else "今天"
     print(f"\n星期 -> product_id 映射表:")
     for w, pid in sorted(PRODUCT_ID_MAP.items()):
-        marker = " <- 今天" if w == weekday else ""
+        marker = f" <- {target_label}" if w == weekday else ""
         print(f"  {DAY_NAMES[w]}: {pid}{marker}")
 
     # Token 年龄检查
