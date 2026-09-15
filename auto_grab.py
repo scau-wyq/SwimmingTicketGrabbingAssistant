@@ -79,6 +79,7 @@ USER_AGENT = (
     'miniProgram/wxdd062848'
 )
 REFERER = 'https://xcx.wesais.com/'
+ORIGIN = 'https://xcx.wesais.com'
 
 # 抢票参数
 BURST_COUNT = 30
@@ -114,11 +115,17 @@ def generate_request_id():
 
 
 def build_headers(token):
-    """构建请求头"""
+    """构建请求头（与小程序实际请求一致）"""
     return {
         'Authorization': token,
         'User-Agent': USER_AGENT,
+        'Accept': 'application/json, text/plain, */*',
         'Content-Type': 'application/x-www-form-urlencoded',
+        'AuthRouter': '',
+        'Origin': ORIGIN,
+        'Sec-Fetch-Site': 'same-site',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Dest': 'empty',
         'Referer': REFERER,
     }
 
@@ -326,22 +333,37 @@ def watch_for_token(log_file, timeout=TOKEN_WAIT_TIMEOUT):
 
 # ============ Token 验证 ============
 
+def make_session():
+    """创建绕过系统代理的 HTTP Session（脚本请求直连，不走 mitmdump）"""
+    s = requests.Session()
+    s.trust_env = False  # 忽略系统代理设置
+    return s
+
 def validate_token(session, token):
-    """验证 token 有效性"""
+    """验证 token 有效性（POST 方式，与小程序一致）"""
     try:
-        resp = session.get(
+        body = {
+            'business_id': BUSINESS_ID,
+            'stadium_id': '0',
+            'cfg_code': 'footer_set',
+            'request_id': hashlib.md5(os.urandom(16)).hexdigest(),
+        }
+        resp = session.post(
             f'{API_BASE}/cfg/cfgCommon/getByCode',
-            params={'code': 'common', 'business_id': BUSINESS_ID},
+            data=body,
             headers=build_headers(token),
             timeout=3
         )
+        print(f"  [调试] HTTP状态: {resp.status_code}")
         result = resp.json()
         code = result.get('code', '?')
         msg = result.get('message', '')
+        print(f"  [调试] API返回: code={code} msg={msg}")
         if code == 40101 or '繁忙' in msg:
             return False
         return True
-    except Exception:
+    except Exception as e:
+        print(f"  [调试] validate_token 异常: {type(e).__name__}: {e}")
         return False
 
 
@@ -471,7 +493,7 @@ def grab_burst(token, product_id, date_str, clock_offset=0.0):
         print(f"\n目标时间已过，立即开始抢票")
 
     # 开始抢票
-    with requests.Session() as session:
+    with make_session() as session:
         if not prewarm(session, token):
             print("\nToken 可能已失效，抢票中止")
             return False
@@ -622,7 +644,7 @@ def main():
 
     show_token_info(token)
 
-    with requests.Session() as session:
+    with make_session() as session:
         if not validate_token(session, token):
             print(f"\n[错误] Token 验证失败！")
             print("可能原因:")
@@ -644,7 +666,7 @@ def main():
 
     # 步骤 5: 抢票
     print(f"\n[步骤 5/5] 准备抢票...")
-    with requests.Session() as session:
+    with make_session() as session:
         clock_offset = calibrate_clock(session, token)
 
     # 显示7天映射表
