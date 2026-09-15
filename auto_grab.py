@@ -45,7 +45,7 @@ import requests
 
 # mitmdump 配置
 MITMDUMP_PATH = r'C:\Users\wang3\anaconda3\envs\SwimmingTicketGrabbingAssistant\Scripts\mitmdump.exe'
-NEW_LOG_FILE = 'traffic_new.log'       # 新的抓包文件
+NEW_LOG_FILE = 'traffic.log'           # 抓包文件（固定名称）
 TOKEN_FILE = 'token.txt'              # token 保存位置
 
 # API 配置
@@ -194,6 +194,28 @@ def is_port_in_use(port):
     result = s.connect_ex(('127.0.0.1', port))
     s.close()
     return result == 0
+
+
+def kill_port_process(port):
+    """杀掉占用指定端口的进程（Windows 用 netstat + taskkill）"""
+    try:
+        # 找到占用端口的 PID
+        result = subprocess.run(
+            ['netstat', '-ano', '-p', 'TCP'],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and f':{port}' in parts[1] and parts[3] == 'LISTENING':
+                pid = int(parts[4])
+                print(f"  杀掉占用端口 {port} 的进程 (PID: {pid})...")
+                subprocess.run(['taskkill', '/F', '/PID', str(pid)],
+                               capture_output=True, timeout=5)
+                time.sleep(1)
+                return True
+    except Exception as e:
+        print(f"  查找端口进程失败: {e}")
+    return False
 
 
 def start_mitmdump(log_file):
@@ -590,28 +612,22 @@ def main():
         print("请确保 mitmproxy 已安装在 conda env 中")
         return
 
-    # 检查端口
+    # 检查端口并启动 mitmdump
+    log_file_to_watch = NEW_LOG_FILE  # 固定使用 traffic.log
+    mitmdump_proc = None
+
     if is_port_in_use(8080):
-        print(f"\n[信息] 端口 8080 已被占用（mitmdump 可能已在运行）")
-        # 检查现有抓包文件
-        if os.path.exists('traffic.log'):
-            print(f"  发现 traffic.log，将监控该文件")
-            log_file_to_watch = 'traffic.log'
-        elif os.path.exists(NEW_LOG_FILE):
-            log_file_to_watch = NEW_LOG_FILE
-        else:
-            print(f"  未发现现有抓包文件，将创建 {NEW_LOG_FILE}")
-            log_file_to_watch = NEW_LOG_FILE
-        mitmdump_proc = None
-    else:
-        log_file_to_watch = NEW_LOG_FILE
-        print(f"\n[步骤 1/5] 启动抓包工具...")
-        mitmdump_proc = start_mitmdump(log_file_to_watch)
-        if not mitmdump_proc:
-            print("\n启动 mitmdump 失败！请手动启动后再运行本脚本")
-            print(f"命令: {MITMDUMP_PATH} -w {log_file_to_watch}")
-            return
-        time.sleep(2)  # 等待 mitmdump 初始化
+        print(f"\n[信息] 端口 8080 已被占用，杀掉旧进程并重启...")
+        kill_port_process(8080)
+        time.sleep(1)
+
+    print(f"\n[步骤 1/5] 启动抓包工具...")
+    mitmdump_proc = start_mitmdump(log_file_to_watch)
+    if not mitmdump_proc:
+        print("\n启动 mitmdump 失败！请手动启动后再运行本脚本")
+        print(f"命令: {MITMDUMP_PATH} -w {log_file_to_watch}")
+        return
+    time.sleep(2)  # 等待 mitmdump 初始化
 
     # 步骤 2: 提示用户打开小程序
     print(f"\n[步骤 2/5] 请打开微信小程序")
