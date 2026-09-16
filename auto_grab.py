@@ -155,6 +155,8 @@ def check_result(result):
         return 'success', f'成功! data={data}'
     if '不合法' in msg:
         return 'invalid_sku', f'SKU未开放: {msg}'
+    if '超出预售天数' in msg or code == 40004007:
+        return 'invalid_sku', f'超出预售天数(token有效): {msg}'
     if '不足' in msg:
         return 'sold_out', f'已售罄: {msg}'
     if code == 40101 or '繁忙' in msg:
@@ -432,6 +434,68 @@ def send_order(session, token, product_id, date_str):
         return {'code': -2, 'message': f'响应解析失败: {e}'}
 
 
+def verify_product_id(session, token, product_id, date_str):
+    """
+    动态验证 product_id 是否正确。
+    调用 getTicketOne 接口，检查返回的 product_id 是否匹配。
+    如果不匹配，尝试所有7个 product_id，找到正确的。
+    """
+    headers = build_headers(token)
+    body = {
+        'business_id': BUSINESS_ID,
+        'stadium_id': STADIUM_ID,
+        'date': date_str,
+        'ticket_product_id': str(product_id),
+        'request_id': generate_request_id(),
+    }
+    try:
+        resp = session.post(
+            f'{API_BASE}/ticket/wxTicketSale/getTicketOne',
+            data=body,
+            headers=headers,
+            timeout=3
+        )
+        result = resp.json()
+        if result.get('code') == 200:
+            data = result.get('data', {})
+            actual_pid = data.get('product_id')
+            if actual_pid == product_id:
+                print(f"  product_id {product_id} 验证通过（API确认）")
+                return product_id
+            else:
+                print(f"  product_id {product_id} 不匹配！API返回 {actual_pid}")
+                print(f"  尝试扫描所有 product_id...")
+        else:
+            print(f"  product_id {product_id} 验证失败: {result.get('message', '?')}")
+    except Exception as e:
+        print(f"  验证请求异常: {e}")
+
+    # 回退: 扫描所有7个 product_id
+    for weekday, pid in sorted(PRODUCT_ID_MAP.items()):
+        if pid == product_id:
+            continue
+        body['ticket_product_id'] = str(pid)
+        body['request_id'] = generate_request_id()
+        try:
+            resp = session.post(
+                f'{API_BASE}/ticket/wxTicketSale/getTicketOne',
+                data=body,
+                headers=headers,
+                timeout=3
+            )
+            result = resp.json()
+            if result.get('code') == 200:
+                actual_pid = result.get('data', {}).get('product_id')
+                if actual_pid == pid:
+                    print(f"  找到正确的 product_id: {pid} ({DAY_NAMES[weekday]})")
+                    return pid
+        except Exception:
+            pass
+
+    print(f"  未找到匹配的 product_id，使用默认值 {product_id}")
+    return product_id
+
+
 def calibrate_clock(session, token):
     """校准时钟"""
     t1 = time.time()
@@ -686,6 +750,35 @@ def main():
                 stop_mitmdump(mitmdump_proc)
             return
         print(f"  Token 验证通过！")
+
+    # 步骤 4.2: 动态验证 product_id 是否正确
+    old_pid = product_id
+    print(f"\n[步骤 4.2] 验证 product_id...")
+    print(f"  硬编码值: {product_id} ({day_name})")
+    with make_session() as session:
+        product_id = verify_product_id(session, token, product_id, date_str)
+    if product_id != old_pid:
+        print(f"  [!] product_id 已动态更新: {old_pid} -> {product_id}")
+        print(f"  [!] 请更新 PRODUCT_ID_MAP 映射表")
+
+    # 步骤 4.5: 立即发一次测试下单请求，验证 token 对下单接口有效
+    print(f"\n[步骤 4.5] 发送测试下单请求（验证 token 对下单接口有效）...")
+    print(f"  使用 SKU: 121000{product_id}{date_str}:1")
+    print(f"  预期结果: SKU未开放 或 已售罄（说明 token 有效，只是票还没到时间）")
+    print()
+    with make_session() as session:
+        test_result = send_order(session, token, product_id, date_str)
+    print_result(test_result, product_id, date_str, prefix="  [测试] ")
+
+    status, desc = check_result(test_result)
+    if status == 'token_expired':
+        print(f"\n[警告] Token 对下单接口无效！抢票将无法成功，请重新运行脚本获取新 token")
+    elif status in ('success', 'invalid_sku', 'sold_out'):
+        print(f"  [OK] Token 对下单接口有效（{desc}）")
+    else:
+        print(f"  [提示] 测试结果为: {desc}")
+
+    print()
 
     # 测试模式到此结束
     if test_only:
