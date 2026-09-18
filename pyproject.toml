@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swimming-ticket-assistant"
+version = "1.0.0"
+description = "Windows WeChat swimming ticket scheduling assistant"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31,<3", "mitmproxy>=11,<13"]
+
+[project.optional-dependencies]
+ui = ["pywinauto>=0.6.8,<0.7"]
+
+[project.scripts]
+swim-assistant = "swim_assistant.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["swim_assistant*"]

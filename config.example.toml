@@ -1,0 +1,53 @@
+# Python 3.11+；相对路径均相对于本配置文件，不依赖启动时的工作目录。
+[runtime]
+directory = "runtime"
+
+[capture]
+# 留空时使用当前 Python 环境 Scripts/mitmdump.exe。
+mitmdump = ""
+port = 8080
+timeout_seconds = 90
+
+[wechat]
+mode = "panel"
+executable = 'C:\Program Files\Tencent\Weixin\Weixin.exe'
+miniprogram_name = "奥冠体育"
+# 已观察到的小程序侧栏坐标；只在面板尚未打开时使用。
+# 窗口尺寸或缩放改变时会停止操作，不会盲点。保持小程序面板打开可避免这一步。
+main_size = [1060, 778]
+panel_button = [31, 430]
+# 如将来有桌面快捷方式，改 mode="shortcut" 并填写 shortcut。
+shortcut = ""
+steps = []
+
+# 如打开快捷方式后还需要进入门票页，可删除上面的 steps=[]，并按实际窗口配置：
+# [[wechat.steps]]
+# action = "wait"
+# seconds = 3
+# [[wechat.steps]]
+# action = "click"
+# window_title_re = "^奥冠体育$"
+# control = { title = "门票", control_type = "Button" }
+# 对无法识别的自绘控件，可使用窗口相对坐标 x=100、y=200，需固定缩放和窗口大小。
+# [[wechat.steps]]
+# action = "keys"
+# window_title_re = "^奥冠体育$"
+# keys = "{ENTER}"
+
+[booking]
+api_base = "https://api.wesais.com"
+business_id = "10000863"
+stadium_id = "11617"
+attempts = 30
+interval_seconds = 0.1
+request_timeout_seconds = 3
+prewarm_seconds = 10
+
+[booking.products]
+0 = 25294 # 周一
+1 = 25293
+2 = 25292
+3 = 25291
+4 = 25289
+5 = 25288
+6 = 25287
