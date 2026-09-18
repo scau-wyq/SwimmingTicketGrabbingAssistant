@@ -5,11 +5,15 @@ from logging.handlers import RotatingFileHandler
 import multiprocessing
 import sys
 import time
+import signal
+from .interrupts import uninterrupted_cleanup
 
 from .config import Settings
 
 
 def _worker(settings: Settings, deadline: float, connection) -> None:
+    # 父进程统一处理 Ctrl+C，并负责终止此工作进程。
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8', errors='replace')
@@ -39,9 +43,10 @@ def run_ui_task(settings: Settings, deadline: float, *, worker=None) -> None:
                               name='wechat-ui-worker')
     started = False
     try:
-        process.start()
-        started = True
-        sender.close()
+        with uninterrupted_cleanup():
+            process.start()
+            started = True
+            sender.close()
         process.join(max(0, deadline - time.monotonic()))
         if process.is_alive():
             raise TimeoutError('微信操作超时；已停止 UI 工作进程，请查看 runtime/wechat.log 的最后一步')
@@ -56,13 +61,14 @@ def run_ui_task(settings: Settings, deadline: float, *, worker=None) -> None:
         if status != 'ok':
             raise RuntimeError(f'微信操作失败 ({status}): {message}')
     finally:
-        if started and process.is_alive():
-            process.terminate()
-            process.join(2)
-            if process.is_alive():
-                process.kill()
+        with uninterrupted_cleanup():
+            if started and process.is_alive():
+                process.terminate()
                 process.join(2)
-        receiver.close()
-        sender.close()
-        if started and not process.is_alive():
-            process.close()
+                if process.is_alive():
+                    process.kill()
+                    process.join(2)
+            receiver.close()
+            sender.close()
+            if started and not process.is_alive():
+                process.close()

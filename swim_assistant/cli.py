@@ -11,6 +11,7 @@ import time
 from .capture import port_in_use
 from .config import ROOT, load_settings
 from .locking import single_instance
+from .interrupts import cleanup_safe_interrupts
 from .proxy import restore_pending
 from .runner import run
 from .wechat import validate_entry
@@ -62,7 +63,7 @@ def main(argv=None) -> int:
         if os.name != 'nt':
             raise RuntimeError('自动采集只支持 Windows')
         configure_logging(settings.runtime_dir)
-        with single_instance(settings.state_dir / 'assistant.lock'):
+        with cleanup_safe_interrupts(), single_instance(settings.state_dir / 'assistant.lock'):
             if args.wechat_only:
                 from .wechat import open_miniprogram
                 logging.info('独立微信测试：不修改代理、不抓包、不调用预约 API')

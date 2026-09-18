@@ -23,6 +23,8 @@ swim_assistant/
   timing.py                 不可变的放票时间、等待
   api.py                    只读校验、票种校验、下单 API
   capture.py                mitmdump 生命周期与 token 等待
+  process_tree.py           Windows Job Object，回收抓包进程及所有子进程
+  interrupts.py             Ctrl+C 与资源回收保护
   token_addon.py            仅提取指定登录响应，原子写入临时 token
   proxy.py                  Windows 用户代理保存、设置、恢复
   wechat.py                 微信主窗口、面板及小程序导航
@@ -83,6 +85,9 @@ python -m unittest discover -s tests -v
 # 单独验证 mitmdump 及插件启停；临时端口，不修改代理或打开微信
 python scripts/check-capture.py
 
+# 清理集成测试：真实 mitmdump + 内存代理替身，不改系统网络
+python scripts/check-cleanup.py
+
 # 只打开微信小程序；不修改代理、不抓包、不调用预约 API
 python auto_grab.py --wechat-only
 
@@ -135,14 +140,18 @@ Windows PowerShell 5.1 读取带中文的 `.ps1` 需要 UTF-8 BOM，本项目脚
 | 未找到奥冠体育 | 将它保留在面板最近使用/我的常用中 |
 | 准备过程已跨零点 | 退出，不顺延一天 |
 | HTTP 下单结果不确定 | 停止重试，请人工查看订单，避免重复提交 |
-| 任务正常失败或 Ctrl+C | 上下文管理器恢复代理并关闭本程序的 mitmdump |
-| 进程被强杀、断电 | 无法保证 finally 执行；下次运行恢复遗留快照，或手动运行下列命令 |
+| 正常结束、任务失败或 Ctrl+C | 先恢复代理，再回收本次 mitmproxy 整个进程树；连续 Ctrl+C 不打断清理 |
+| 代理原先已指向本次 127.0.0.1:端口（或 localhost:端口） | 退出时关闭这个残留代理，避免指向已经停止的抓包端口 |
+| 代理恢复失败 | 仍然回收抓包进程树，报错并保留恢复文件，不宣称清理成功 |
+| 进程被强杀、断电 | 无法保证代理恢复代码执行；Job Object 在拥有者退出时回收抓包子进程，代理需要下次启动恢复或手动恢复 |
 
 ```powershell
 python auto_grab.py --restore-proxy
 ```
 
-恢复操作使用 `%LOCALAPPDATA%\SwimmingTicketAssistant\proxy-recovery.json` 中保存的原值。如果异常后你已经手动改过代理，应先检查快照再恢复。强杀还可能留下本程序的 mitmdump 进程，程序会提示端口占用，不会盲目清理。
+恢复操作使用 `%LOCALAPPDATA%\SwimmingTicketAssistant\proxy-recovery.json` 中保存的恢复值。如果异常后你已经手动改过代理，应先检查快照再恢复。除上述指向本次抓包端口的残留代理外，原有代理设置会恢复。本程序不会按进程名称或端口杀其他人的程序；旧版本遗留进程或其他程序占用端口时仍会提示并停止启动。
+
+清理日志会分别打印“系统代理已恢复…”和“mitmproxy 进程树已停止，端口…已释放”。抓包启动器在挂起状态加入 Windows Job Object 后才允许运行，因此其子进程也受同一个 Job 管理，即使启动器提前退出也能一起回收。
 
 退出码：`0` 成功（测试成功/预约成功），`1` 配置或流程错误，`2` 本次预约未成功，`130` 用户中断。
 

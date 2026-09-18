@@ -5,11 +5,15 @@ import json
 import os
 from pathlib import Path
 import socket
-import subprocess
+import logging
 import time
 import uuid
 
 from .config import Settings
+from .interrupts import uninterrupted_cleanup
+from .process_tree import ProcessTree
+
+log = logging.getLogger(__name__)
 
 
 def port_in_use(port: int) -> bool:
@@ -57,9 +61,9 @@ def start_capture(settings: Settings):
                '--set', 'flow_detail=0', '--set', 'termlog_verbosity=error',
                '-s', str(Path(__file__).with_name('token_addon.py'))]
     with (settings.runtime_dir / 'mitmdump.log').open('ab') as output:
-        process = subprocess.Popen(command, env=environment, stdout=output, stderr=output,
-                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        process = None
         try:
+            process = ProcessTree(command, env=environment, output=output)
             ready_deadline = time.monotonic() + 15
             while True:
                 if process.poll() is not None:
@@ -71,19 +75,16 @@ def start_capture(settings: Settings):
                 time.sleep(0.2)
             yield Capture(process, path, run_id)
         finally:
-            if process.poll() is None:
-                process.terminate()
+            with uninterrupted_cleanup():
                 try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-            # Windows 的 console-script 启动器可能先于其 Python 子进程退出。
-            # 本机复现：wait() 返回时端口尚可连接，约 2 秒后才关闭。
-            release_deadline = time.monotonic() + 5
-            while port_in_use(settings.proxy_port) and time.monotonic() < release_deadline:
-                time.sleep(0.1)
-            path.unlink(missing_ok=True)
-            path.with_suffix('.tmp').unlink(missing_ok=True)
-            if port_in_use(settings.proxy_port):
-                raise RuntimeError('抓包进程退出后端口仍被占用，请检查残留进程；系统代理已尝试恢复')
+                    if process is not None:
+                        process.close()
+                        release_deadline = time.monotonic() + 5
+                        while port_in_use(settings.proxy_port) and time.monotonic() < release_deadline:
+                            time.sleep(0.1)
+                        if port_in_use(settings.proxy_port):
+                            raise RuntimeError('抓包进程树已停止，但端口仍被占用，请检查其他进程')
+                        log.info('mitmproxy 进程树已停止，端口 %d 已释放', settings.proxy_port)
+                finally:
+                    path.unlink(missing_ok=True)
+                    path.with_suffix('.tmp').unlink(missing_ok=True)

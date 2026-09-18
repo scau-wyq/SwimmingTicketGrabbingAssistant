@@ -3,7 +3,9 @@
 from contextlib import contextmanager
 import ctypes
 import json
+import logging
 from pathlib import Path
+from .interrupts import uninterrupted_cleanup
 
 REG_PATH = r'Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 PROXY_KEYS = ('ProxyEnable', 'ProxyServer', 'ProxyOverride', 'AutoConfigURL')
@@ -54,8 +56,9 @@ def restore_pending(path: Path, backend=None) -> bool:
     if not path.exists():
         return False
     backend = backend or WindowsProxy()
-    backend.restore(json.loads(path.read_text(encoding='utf-8')))
-    path.unlink()
+    with uninterrupted_cleanup():
+        backend.restore(json.loads(path.read_text(encoding='utf-8')))
+        path.unlink()
     return True
 
 
@@ -65,6 +68,12 @@ def managed_proxy(address: str, recovery: Path, backend=None):
     if recovery.exists():
         raise RuntimeError('存在待恢复代理快照，请先运行 --restore-proxy')
     values = backend.snapshot()
+    server = values.get('ProxyServer')
+    enabled = values.get('ProxyEnable')
+    if server and enabled and enabled[0] and str(server[0]).lower().replace('localhost:', '127.0.0.1:') == address.lower():
+        # 捕获启动前已验证此端口空闲；不能恢复成指向本次已关闭端口的残留代理。
+        values = {**values, 'ProxyEnable': [0, enabled[1]]}
+        logging.getLogger(__name__).warning('原代理指向本次抓包端口，退出时将关闭该残留代理')
     recovery.parent.mkdir(parents=True, exist_ok=True)
     with recovery.open('x', encoding='utf-8') as stream:
         json.dump(values, stream)
@@ -72,5 +81,7 @@ def managed_proxy(address: str, recovery: Path, backend=None):
         backend.enable(address)
         yield
     finally:
-        backend.restore(values)
-        recovery.unlink()
+        with uninterrupted_cleanup():
+            backend.restore(values)
+            recovery.unlink()
+            logging.getLogger(__name__).info('系统代理已恢复到运行前的设置')
