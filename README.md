@@ -8,6 +8,7 @@ Windows 任务计划程序每天 **23:58（电脑本地时间）** 启动 Python
 
 - 已实现模块化流程、窗口选择、代理恢复、每日任务安装脚本及离线回归测试。
 - 已根据现场观察配置本机微信路径和「奥冠体育」入口；面板的“最近使用”和“我的常用”中均存在该小程序。
+- 已现场跑通独立微信测试：激活微信、打开小程序面板、识别入口、打开「奥冠体育」，用户已确认看到目标窗口。
 - **尚未完成真实微信自动取 token 的端到端联调，也未安装每日计划任务。** 离线测试不会操作桌面或创建订单。启用正式计划任务前，先运行下文 `--test` 验证。
 - 关闭再打开小程序不保证每次触发新的登录响应。如果 `--test` 超时，需确认当前微信版本的缓存行为，或在 `wechat.steps` 增加进入门票页面的操作。不能把打开窗口当作获取 token 成功。
 
@@ -25,6 +26,7 @@ swim_assistant/
   token_addon.py            仅提取指定登录响应，原子写入临时 token
   proxy.py                  Windows 用户代理保存、设置、恢复
   wechat.py                 微信主窗口、面板及小程序导航
+  ui_worker.py              独立 UI 进程，强制超时与失败回传
   locking.py                系统释放的跨进程锁
 config.example.toml         可提交的配置模板
 config.toml                 本机配置（不提交）
@@ -68,6 +70,8 @@ python auto_grab.py --doctor
 
 主窗口和面板的标题都可能为「微信」，代码额外匹配 `Weixin.exe` / `WeChatAppEx.exe`。首次侧栏点击使用本机观察到的窗口相对坐标 `[31, 430]`，参考窗口尺寸 `[1060, 778]`。窗口尺寸或缩放变化时会拒绝点击：最简单的处理是提前打开小程序面板；也可重新校准配置。不会自动调整你的桌面或窗口布局。
 
+顶层窗口使用 `win32` 后端查找（支持 64 位 Windows），避免全桌面 UIA 枚举阻塞。仅在目标面板内使用 UIA 查找文字控件。坐标检查使用 DWM 可见边界，排除 Win32 窗口的透明边框。整个 UI 操作运行在独立进程中，超过 `capture.timeout_seconds` 的共享期限会被停止，不会无限卡住父流程。
+
 如有小程序快捷方式，可改成 `mode = "shortcut"` 并填写 `shortcut`。需要进入门票页时，可以配置 `wait`、`click`、`keys` 步骤，见模板中的示例。控件名必须来自实际界面，示例中的“门票”不是已验证选择器。七张二维码目前不参与自动化；订单日期和票种由 API 参数选择。
 
 ## 验证与正式运行
@@ -78,6 +82,9 @@ python -m unittest discover -s tests -v
 
 # 单独验证 mitmdump 及插件启停；临时端口，不修改代理或打开微信
 python scripts/check-capture.py
+
+# 只打开微信小程序；不修改代理、不抓包、不调用预约 API
+python auto_grab.py --wechat-only
 
 # 会打开微信、临时切换代理和获取 token，但绝不下单
 python auto_grab.py --test
@@ -117,6 +124,8 @@ Windows PowerShell 5.1 读取带中文的 `.ps1` 需要 UTF-8 BOM，本项目脚
 ## 故障与恢复
 
 日志在 `runtime/assistant.log`，按大小轮转；mitmdump 错误在 `runtime/mitmdump.log`。日志不记录 token、账户信息或完整 HTTP 流量。
+
+微信操作的详细阶段日志和异常堆栈在 `runtime/wechat.log`。`--wechat-only` 成功仅表示目标窗口已出现，不表示已获取 token 或验证预约接口。
 
 | 情况 | 行为/处理 |
 |---|---|

@@ -2,13 +2,23 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 from swim_assistant.config import Settings, load_settings
 from swim_assistant import wechat
 
 
 class WechatTests(unittest.TestCase):
+    def test_top_level_enumeration_uses_native_windows_not_desktop_uia(self):
+        desktop = Mock()
+        desktop.return_value.windows.side_effect = RuntimeError('stop after backend selection')
+        with patch.dict('sys.modules', {'pywinauto': SimpleNamespace(Desktop=desktop),
+                                       'pywinauto.application': SimpleNamespace(process_module=Mock())}):
+            with self.assertRaises(RuntimeError):
+                wechat._open_from_panel(Settings(), float('inf'))
+        desktop.assert_called_once_with(backend='win32')
+
     def test_select_window_distinguishes_same_title_processes(self):
         main, panel = Mock(), Mock()
         for window, pid in ((main, 1), (panel, 2)):

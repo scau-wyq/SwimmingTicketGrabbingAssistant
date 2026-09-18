@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import sys
+import time
 
 from .capture import port_in_use
 from .config import ROOT, load_settings
@@ -52,6 +53,7 @@ def main(argv=None) -> int:
     parser.add_argument('--doctor', action='store_true', help='仅检查配置和环境，不修改系统设置')
     parser.add_argument('--restore-proxy', action='store_true', help='恢复异常终止前保存的代理设置')
     parser.add_argument('--scheduled', action='store_true', help='计划任务专用：只允许 23:58–23:59 启动')
+    parser.add_argument('--wechat-only', action='store_true', help='只测试打开微信小程序；不修改代理、不抓包、不下单')
     args = parser.parse_args(argv)
     try:
         settings = load_settings(args.config)
@@ -61,6 +63,12 @@ def main(argv=None) -> int:
             raise RuntimeError('自动采集只支持 Windows')
         configure_logging(settings.runtime_dir)
         with single_instance(settings.state_dir / 'assistant.lock'):
+            if args.wechat_only:
+                from .wechat import open_miniprogram
+                logging.info('独立微信测试：不修改代理、不抓包、不调用预约 API')
+                open_miniprogram(settings, time.monotonic() + settings.token_timeout)
+                logging.info('独立微信测试成功：已找到目标小程序窗口')
+                return 0
             if args.restore_proxy:
                 restored = restore_pending(settings.state_dir / 'proxy-recovery.json')
                 logging.info('代理已恢复' if restored else '没有待恢复的代理设置')
