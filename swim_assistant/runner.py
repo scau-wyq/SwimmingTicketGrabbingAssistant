@@ -48,6 +48,15 @@ def run(settings: Settings, *, test_only: bool = False, manual: bool = False,
     target = RunTarget.create(now, date_override)
     log.info('本次放票时间=%s，预约日期=%s，模式=%s', target.release_at, target.date_str,
              '仅获取并验证 token' if test_only else '正式预约')
+    if not test_only:
+        preparation_at = target.release_at - timedelta(minutes=2)
+        if now < preparation_at:
+            log.info('等待至 %s 开始准备；等待期间不启动抓包、不启用临时代理、不打开微信。Ctrl+C 可取消',
+                     preparation_at)
+            wait_until(preparation_at)
+        # 休眠或时钟跳变后仍使用本次固定目标，不能顺延到下一天。
+        target.require_preparation_time(datetime.now())
+        log.info('已到准备时段，开始获取本次 token')
     token = acquire_token(settings, target, manual, test_only)
     client = ApiClient(settings, token)
     try:

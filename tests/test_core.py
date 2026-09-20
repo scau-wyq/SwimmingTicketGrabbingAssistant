@@ -41,7 +41,7 @@ class CoreTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             client = Mock()
             client.validate_token.return_value = False
-            with patch('swim_assistant.runner.acquire_token', return_value='secret'), patch('swim_assistant.runner.ApiClient', return_value=client):
+            with patch('swim_assistant.runner.wait_until'), patch('swim_assistant.runner.acquire_token', return_value='secret'), patch('swim_assistant.runner.ApiClient', return_value=client):
                 with self.assertRaises(RuntimeError):
                     run(Settings(runtime_dir=Path(directory), state_dir=Path(directory) / 'state'))
             client.send_order.assert_not_called()
