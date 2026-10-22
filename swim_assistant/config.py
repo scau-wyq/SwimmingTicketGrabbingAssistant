@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
-import sys
+import sysconfig
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14,7 +14,7 @@ DEFAULT_PRODUCTS = {0: 25294, 1: 25293, 2: 25292, 3: 25291, 4: 25289, 5: 25288, 
 class Settings:
     state_dir: Path = field(default_factory=lambda: Path(os.environ.get('LOCALAPPDATA', str(Path.home() / '.local' / 'state'))) / 'SwimmingTicketAssistant')
     runtime_dir: Path = ROOT / 'runtime'
-    mitmdump: Path = Path(sys.executable).parent / 'Scripts' / 'mitmdump.exe'
+    mitmdump: Path = Path(sysconfig.get_path('scripts')) / 'mitmdump.exe'
     proxy_port: int = 8080
     token_timeout: float = 90
     shortcut: str = ''

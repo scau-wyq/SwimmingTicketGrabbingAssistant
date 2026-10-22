@@ -47,6 +47,29 @@ runtime/                    日志与短暂采集文件（不提交）
 
 ## 环境与启动
 
+### 一键安装（推荐）
+
+先安装 **64 位 Python 3.12**（已有符合条件的 Conda 环境也可以），在项目目录执行：
+
+```powershell
+python scripts/setup-env.py
+```
+
+脚本自动创建或复用项目内 `.venv`，安装 `requirements-ui.txt` 全部依赖，检查依赖和导入，仅在缺失时创建 `config.toml`，最后运行 `--doctor`。无需激活虚拟环境，不修改原 Conda 环境。安装失败后可重新执行；不完整的 `.venv` 会明确报错，不会自动删除。若 `python` 不是 3.12，可使用 `py -3.12 scripts/setup-env.py`。
+
+依赖安装需要联网。微信安装/登录、微信路径配置、mitmproxy CA 生成和信任仍需单独完成；安装脚本不启动代理、微信或预约，也不创建定时任务。退出码 `0` 表示安装及检查通过，`1` 表示安装失败，`2` 表示依赖已安装但运行条件仍需补齐。
+
+安装后使用新环境运行（下文所有 `python` 命令也可替换成这个路径）：
+
+```powershell
+.\.venv\Scripts\python.exe auto_grab.py --doctor
+.\.venv\Scripts\python.exe auto_grab.py --wechat-only
+```
+
+配置中的 `capture.mitmdump` 留空即可自动使用当前环境；如果已有配置明确指定旧路径，需自行核对。安装定时任务时，`-PythonPath` 应指定本项目 `.venv\Scripts\python.exe` 的完整路径；已有任务不会自动切换环境。
+
+### 使用现有 Conda 环境
+
 推荐 Python 3.12。当前项目 Conda 环境已安装 requests、mitmproxy、pywinauto。新环境运行：
 
 ```powershell
