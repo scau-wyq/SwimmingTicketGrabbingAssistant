@@ -74,6 +74,45 @@ def visible_window_bounds(window):
     return bounds
 
 
+def window_work_area(window):
+    """使用窗口所在屏幕的工作区，兼容副屏和负坐标，避开任务栏。"""
+    import win32api
+    monitor = win32api.MonitorFromWindow(window.handle, 2)
+    return win32api.GetMonitorInfo(monitor)['Work']
+
+
+def ensure_main_window_size(window, reference, deadline):
+    """恢复普通窗口并校准可见尺寸，验证成功后才允许坐标点击。"""
+    if window.is_minimized() or window.is_maximized():
+        window.restore()
+    window.set_focus()
+    for attempt in range(4):
+        if time.monotonic() >= deadline:
+            raise TimeoutError('调整微信窗口超过准备期限')
+        bounds = visible_window_bounds(window)
+        width, height = bounds.right - bounds.left, bounds.bottom - bounds.top
+        left, top, right, bottom = window_work_area(window)
+        size_ok = abs(width - reference[0]) <= 4 and abs(height - reference[1]) <= 4
+        fits = bounds.left >= left and bounds.top >= top and bounds.right <= right and bounds.bottom <= bottom
+        if size_ok and fits:
+            return bounds
+        if attempt == 3:
+            raise RuntimeError(f'微信未接受自动调整后的尺寸（当前 {width}x{height}，目标 {reference[0]}x{reference[1]}），停止点击')
+        if reference[0] > right - left or reference[1] > bottom - top:
+            raise RuntimeError('当前屏幕工作区不足以容纳配置的微信窗口尺寸，停止点击')
+        outer = window.rectangle()
+        # move_window 接受含透明边框的外框尺寸，而配置使用 DWM 可见尺寸。
+        outer_width = outer.right - outer.left + reference[0] - width
+        outer_height = outer.bottom - outer.top + reference[1] - height
+        visible_left = max(left, min(bounds.left, right - reference[0]))
+        visible_top = max(top, min(bounds.top, bottom - reference[1]))
+        log.info('[微信] 自动调整可见窗口：%dx%d → %dx%d', width, height, *reference)
+        window.move_window(x=visible_left + outer.left - bounds.left,
+                           y=visible_top + outer.top - bounds.top,
+                           width=outer_width, height=outer_height, repaint=True)
+        time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+
+
 def _open_from_panel(settings: Settings, deadline: float) -> None:
     log.info('[微信 1] 加载 pywinauto')
     from pywinauto import Desktop
@@ -105,44 +144,83 @@ def _open_from_panel(settings: Settings, deadline: float) -> None:
                 raise TimeoutError('目标小程序未关闭')
             time.sleep(0.2)
 
-    panel = find('微信', 'WeChatAppEx.exe')
-    if panel is None:
+    def open_panel():
         log.info('[微信 3] 启动/激活微信主程序')
         os.startfile(str(settings.wechat_executable))
         main = wait_window('微信', settings.wechat_executable.name)
-        if main.is_minimized():
-            main.restore()
-        main.set_focus()
-        log.info('[微信 4] 微信已聚焦，检查窗口尺寸')
-        bounds = visible_window_bounds(main)
+        log.info('[微信 4] 自动恢复并校准微信窗口尺寸')
+        bounds = ensure_main_window_size(main, settings.main_size, deadline)
         width, height = bounds.right - bounds.left, bounds.bottom - bounds.top
         log.info('[微信] 可见窗口尺寸=%dx%d', width, height)
         coords = panel_button_coordinates(width, height, settings.main_size, settings.panel_button)
         main.click_input(coords=(bounds.left + coords[0], bounds.top + coords[1]), absolute=True)
         log.info('[微信 5] 已点击小程序侧栏入口')
-        panel = wait_window('微信', 'WeChatAppEx.exe')
-    if panel.is_minimized():
-        panel.restore()
-    panel.set_focus()
-    log.info('[微信 6] 面板已聚焦，读取奥冠体育文字控件')
-    panel_uia = Desktop(backend='uia').window(handle=panel.handle).wrapper_object()
-    reported_controls = False
-    while time.monotonic() < deadline:
-        # 已观察到“最近使用”和“我的常用”均有奥冠体育；同名项打开的是同一小程序。
-        text_controls = panel_uia.descendants(control_type='Text')
-        entries = [item for item in text_controls
-                   if item.window_text() == settings.miniprogram_name and item.is_visible()]
-        if not reported_controls:
-            log.info('[微信] 可读取文字控件=%d，匹配入口=%d', len(text_controls), len(entries))
-            reported_controls = True
-        if entries:
-            log.info('[微信 7] 找到 %d 个入口，点击第一个', len(entries))
-            entries[0].click_input()
+
+    # 正常加载也可能短暂空白：每轮允许 12 秒，最多重开两次。
+    for attempt in range(3):
+        if time.monotonic() >= deadline:
+            break
+        if find('微信', 'WeChatAppEx.exe') is None:
+            open_panel()
+        entry = _wait_panel_entry(
+            lambda: find('微信', 'WeChatAppEx.exe'),
+            lambda panel: Desktop(backend='uia').window(handle=panel.handle).wrapper_object(),
+            settings.miniprogram_name, min(deadline, time.monotonic() + 12))
+        if entry is not None:
+            if time.monotonic() >= deadline:
+                raise TimeoutError('点击小程序入口前已超过准备期限')
+            log.info('[微信 7] 找到可见小程序入口，点击')
+            entry.click_input()
             wait_window(settings.miniprogram_name, 'WeChatAppEx.exe')
             log.info('[微信 8] 目标小程序窗口已出现')
             return
-        time.sleep(0.3)
-    raise TimeoutError('小程序面板中未找到奥冠体育；请将它保留在最近使用或我的常用中')
+        if attempt == 2 or time.monotonic() >= deadline:
+            break
+        log.warning('[微信] 面板持续未出现目标入口，重开面板（恢复 %d/2）', attempt + 1)
+        # 只关闭精确标题和进程匹配的窗口；多个候选仍拒绝操作。
+        panel = find('微信', 'WeChatAppEx.exe')
+        if panel is not None:
+            panel.close()
+            close_deadline = min(deadline, time.monotonic() + 3)
+            while find('微信', 'WeChatAppEx.exe') is not None:
+                if time.monotonic() >= close_deadline:
+                    raise TimeoutError('异常小程序面板未关闭，停止恢复')
+                time.sleep(0.2)
+    raise TimeoutError('小程序面板持续未就绪或未找到目标入口；已用尽恢复次数或准备时间，'
+                       '请检查微信网络，并将小程序保留在最近使用/我的常用中')
+
+
+def _wait_panel_entry(find_panel, wrap_panel, name, deadline):
+    """以可见入口判断可操作状态；重新获取窗口和 UIA 包装器以应对页面重建。"""
+    previous_state = None
+    focused_handle = None
+    while time.monotonic() < deadline:
+        panel = find_panel()  # 歧义窗口错误必须向上传递。
+        entries = []
+        if panel is None:
+            state = ('窗口消失或尚未出现',)
+        else:
+            try:
+                if focused_handle != panel.handle:
+                    if panel.is_minimized():
+                        panel.restore()
+                    panel.set_focus()
+                    focused_handle = panel.handle
+                controls = wrap_panel(panel).descendants(control_type='Text')
+                entries = [item for item in controls
+                           if item.window_text() == name and item.is_visible()]
+                state = (panel.handle, len(controls), len(entries))
+            except Exception as exc:
+                # COM/UIA 异常随控件生命周期变化，仅重试读取，不吞掉点击错误。
+                state = (panel.handle, 'UIA 读取失败', type(exc).__name__)
+                focused_handle = None
+        if state != previous_state:
+            log.info('[微信 6] 面板状态（句柄/文字数/入口数或异常类型）=%s', state)
+            previous_state = state
+        if entries:
+            return entries[0]
+        time.sleep(min(0.3, max(0, deadline - time.monotonic())))
+    return None
 
 
 def open_miniprogram(settings: Settings, deadline: float) -> None:

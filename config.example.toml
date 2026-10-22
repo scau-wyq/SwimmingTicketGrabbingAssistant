@@ -13,7 +13,8 @@ mode = "panel"
 executable = 'C:\Program Files\Tencent\Weixin\Weixin.exe'
 miniprogram_name = "奥冠体育"
 # 已观察到的小程序侧栏坐标；只在面板尚未打开时使用。
-# 窗口尺寸或缩放改变时会停止操作，不会盲点。保持小程序面板打开可避免这一步。
+# 窗口大小变化时自动恢复到 main_size；重新测量成功后才点击。
+# Windows 显示缩放或微信侧栏布局变化后，仍需校准 panel_button。
 main_size = [1060, 778]
 panel_button = [31, 430]
 # 如将来有桌面快捷方式，改 mode="shortcut" 并填写 shortcut。
